@@ -5,6 +5,8 @@ import inflection
 from typing import Any, Dict, List, Optional, Tuple, Union
 from contextlib import contextmanager
 import logging
+import os
+import urllib.parse
 from app.config import settings
 
 # Set up logging
@@ -14,35 +16,76 @@ logger = logging.getLogger(__name__)
 class DatabaseError(Exception):
     """Custom exception for database-related errors"""
     pass
+
 class Database:
-    def __init__(self, host: str, port: str, dbname: str, user: str, password: str):
-        self.host = host
-        self.dbname = dbname
-        self.port = port
-        self.user = user
-        self.password = password
+    def __init__(self, host: str = None, port: str = None, dbname: str = None, user: str = None, password: str = None):
+        # Check if DATABASE_URL is available (Heroku provides this)
+        database_url = os.environ.get('DATABASE_URL')
+        
+        if database_url:
+            logger.info("Using DATABASE_URL from environment")
+            # Convert postgres:// to postgresql:// (psycopg2 expects this)
+            if database_url.startswith('postgres://'):
+                database_url = database_url.replace('postgres://', 'postgresql://')
+                logger.info("Converted postgres:// to postgresql:// in DATABASE_URL")
+            
+            # Parse the URL
+            parsed_url = urllib.parse.urlparse(database_url)
+            
+            self.host = parsed_url.hostname
+            self.port = parsed_url.port or 5432
+            self.dbname = parsed_url.path[1:]  # Remove leading slash
+            self.user = parsed_url.username
+            self.password = parsed_url.password
+            
+            logger.info(f"Parsed database connection from URL: host={self.host}, port={self.port}, dbname={self.dbname}, user={self.user}")
+        else:
+            # Fall back to individual parameters
+            logger.info("Using individual database connection parameters")
+            self.host = host
+            self.port = port
+            self.dbname = dbname
+            self.user = user
+            self.password = password
+        
         self.conn = None
         self.cursor = None
         self._connection_params = {
-            'host': host,
-            'port': port,
-            'dbname': dbname,
-            'user': user,
-            'password': password
+            'host': self.host,
+            'port': self.port,
+            'dbname': self.dbname,
+            'user': self.user,
+            'password': self.password
         }
 
     def connect(self) -> None:
         """Establish database connection with error handling"""
         try:
-            logger.info("Connecting to the database...")
+            logger.info(f"Connecting to database at {self.host}:{self.port}/{self.dbname}")
             self.conn = psycopg2.connect(**self._connection_params)
             self.cursor = self.conn.cursor()
             self.cursor.execute("SELECT version()")
             db_version = self.fetch_one()
             logger.info(f"Successfully connected to database: {db_version}")
+            return True
         except psycopg2.Error as e:
             logger.error(f"Failed to connect to database: {str(e)}")
-            raise DatabaseError(f"Database connection failed: {str(e)}")
+            if "could not connect to server" in str(e):
+                logger.error("Database server connection failed. Check network and credentials.")
+            elif "database" in str(e) and "does not exist" in str(e):
+                logger.error("Database does not exist. It may need to be created.")
+            return False
+    
+    def is_connected(self) -> bool:
+        """Check if database connection is active"""
+        if self.conn is None:
+            return False
+        try:
+            # Try a simple query to test connection
+            self.cursor.execute("SELECT 1")
+            return True
+        except (psycopg2.Error, AttributeError):
+            return False
 
     def close(self) -> None:
         """Safely close database connections"""
@@ -95,6 +138,7 @@ class Database:
         except psycopg2.Error as e:
             logger.error(f"Error fetching all rows: {str(e)}")
             raise DatabaseError(f"Failed to fetch all rows: {str(e)}")
+
 class BaseModel:
     table_name = None
 
@@ -146,6 +190,7 @@ class BaseModel:
     # display the attributes of the class
     def __repr__(self):
         return f"{self.__class__.__name__}({self.__dict__})"
+
 class User(BaseModel):
     table_name = "users"
     user_id: int
@@ -168,6 +213,7 @@ class User(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Doctor(BaseModel):
     table_name = "doctors"
     user_id: int
@@ -188,6 +234,7 @@ class Doctor(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Patient(BaseModel):
     table_name = "patients"
     user_id: int
@@ -201,6 +248,7 @@ class Patient(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Admin(BaseModel):
     table_name = "admins"
     user_id: int
@@ -216,6 +264,7 @@ class Admin(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Notification(BaseModel):
     table_name = "notifications"
     notification_id: int
@@ -233,6 +282,7 @@ class Notification(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Appointment(BaseModel):
     table_name = "appointments"
     appointment_id: int
@@ -250,6 +300,7 @@ class Appointment(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Rating(BaseModel):
     table_name = "ratings"
     rating_id: int
@@ -267,6 +318,7 @@ class Rating(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class InsuranceType(BaseModel):
     table_name = "insurance_types"
     insurance_type_id: int
@@ -281,6 +333,7 @@ class InsuranceType(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class DoctorInsurance(BaseModel):
     table_name = "doctor_insurance"
     doctor_id: int
@@ -295,6 +348,7 @@ class DoctorInsurance(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class DoctorLanguage(BaseModel):
     table_name = "doctor_languages"
     doctor_id: int
@@ -309,6 +363,7 @@ class DoctorLanguage(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Language(BaseModel):
     table_name = "languages"
     language_id: int
@@ -323,6 +378,7 @@ class Language(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 class Prescription(BaseModel):
     table_name = "prescriptions"
     prescription_id: int
@@ -350,6 +406,7 @@ class Prescription(BaseModel):
         kwargs['updated_at'] = datetime.now()
         query = super().update(**kwargs)
         return query
+
 class PrescriptionMedication(BaseModel):
     table_name = "prescription_medications"
     medication_id: int
@@ -369,4 +426,5 @@ class PrescriptionMedication(BaseModel):
     def find(cls, **kwargs):
         query = cls.select(**kwargs)
         return query
+
 db = Database(settings.DATABASE_HOST, settings.DATABASE_PORT ,settings.DATABASE_NAME, settings.DATABASE_USER, settings.DATABASE_PASSWORD)

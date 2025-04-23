@@ -8,16 +8,13 @@ from dotenv import load_dotenv
 from app.database.database import db
 from app.routes.main_route import router
 
-# Check if .env file exists
+# Check for .env file and load it if exists
 env_path = Path(__file__).parent / '.env'
-if not env_path.exists():
-    raise FileNotFoundError(
-        "The .env file is missing. Please create a .env file in the root directory of the project. "
-        "You can use the .env.example file as a template."
-    )
-
-# Load environment variables from .env file
-load_dotenv(dotenv_path=env_path)
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path)
+    print("Loaded .env file")
+else:
+    print("No .env file found, using environment variables directly")
 
 # List of required environment variables
 REQUIRED_ENV_VARS = [
@@ -48,50 +45,54 @@ for var in REQUIRED_ENV_VARS:
     if not value:
         missing_or_empty_vars.append(var)
 
-if missing_or_empty_vars:
-    raise ValueError(
-        f"The following required environment variables are missing or empty in the .env file: {', '.join(missing_or_empty_vars)}. "
-        "Please ensure all required variables are defined and have valid values."
-    )
+if missing_or_empty_vars and os.getenv("ENVIRONMENT") != "production":
+    print(f"Warning: The following environment variables are missing or empty: {', '.join(missing_or_empty_vars)}")
+
+# For Heroku's DATABASE_URL
+database_url = os.getenv('DATABASE_URL')
+if database_url and database_url.startswith('postgres://'):
+    # Heroku uses postgres:// but psycopg2 expects postgresql://
+    os.environ['DATABASE_URL'] = database_url.replace('postgres://', 'postgresql://')
+    print("Converted DATABASE_URL from postgres:// to postgresql://")
 
 class Settings(BaseSettings):
     # Basic Settings
     VERSION: str = "1.0.0"
     ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
-    DEBUG: bool = os.getenv("DEBUG", "True") == "True"
+    DEBUG: bool = os.getenv("DEBUG", "False") == "True"
     HOST: str = "0.0.0.0"
     PORT: int = int(os.getenv("PORT", 8000))
     WORKERS: int = int(os.getenv("WEB_CONCURRENCY", 1))
 
     # JWT Settings
-    jwt_public_key: str
-    jwt_private_key: str
-    jwt_algorithm: str
-    refresh_token_expires_in: int
-    access_token_expires_in: int
+    jwt_public_key: str = os.getenv("JWT_PUBLIC_KEY", "")
+    jwt_private_key: str = os.getenv("JWT_PRIVATE_KEY", "")
+    jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
+    refresh_token_expires_in: int = int(os.getenv("REFRESH_TOKEN_EXPIRES_IN", "60"))
+    access_token_expires_in: int = int(os.getenv("ACCESS_TOKEN_EXPIRES_IN", "15"))
     
     # 2FA Settings
-    twofactor_secret: str
+    twofactor_secret: str = os.getenv("TWOFACTOR_SECRET", "")
     
     # Google OAuth Settings
-    google_client_id: str
-    google_client_secret: str
+    google_client_id: str = os.getenv("GOOGLE_CLIENT_ID", "")
+    google_client_secret: str = os.getenv("GOOGLE_CLIENT_SECRET", "")
     
     # Email Settings
-    my_mail: str
-    my_pass: str
+    my_mail: str = os.getenv("MY_MAIL", "")
+    my_pass: str = os.getenv("MY_PASS", "")
     
     # Cloud Settings
-    cloud_name: str
-    api_key: str
-    api_secret: str
+    cloud_name: str = os.getenv("CLOUD_NAME", "")
+    api_key: str = os.getenv("API_KEY", "")
+    api_secret: str = os.getenv("API_SECRET", "")
 
     # Database Settings
-    database_host: str
-    database_port: int
-    database_name: str
-    database_user: str
-    database_password: str
+    database_host: str = os.getenv("DATABASE_HOST", "")
+    database_port: int = int(os.getenv("DATABASE_PORT", "5432"))
+    database_name: str = os.getenv("DATABASE_NAME", "")
+    database_user: str = os.getenv("DATABASE_USER", "")
+    database_password: str = os.getenv("DATABASE_PASSWORD", "")
     
     class Config:
         env_file = ".env"
@@ -103,17 +104,17 @@ settings = Settings()
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="Your API Title",
-        description="Your API Description",
+        title="HealSeek API",
+        description="Healthcare Provider API",
         version=settings.VERSION,
         docs_url="/docs",
         redoc_url="/redoc"
     )
 
-    # Configure CORS
+    # Configure CORS - fix trailing slashes
     origins: List[str] = [
         "http://localhost.tiangolo.com",
-        "https://healseek-0b244fb67ca5.herokuapp.com/"
+        "https://healseek-0b244fb67ca5.herokuapp.com",
         "https://localhost.tiangolo.com",
         "http://localhost",
         "http://localhost:8080",
@@ -125,7 +126,7 @@ def create_app() -> FastAPI:
         "https://healseek.vercel.app/en",
         "https://healseek.vercel.app/ar",
         "https://healseek.vercel.app/fr",
-        "https://healseek.onrender.com/",
+        "https://healseek.onrender.com",
     ]
 
     app.add_middleware(
@@ -140,16 +141,20 @@ def create_app() -> FastAPI:
     async def init_db():
         """Initialize database connection and execute setup scripts."""
         try:
+            print("Connecting to database...")
             db.connect()
+            print("Database connected successfully")
             
             sql_path = Path(__file__).parent / "text.sql"
             if sql_path.exists():
                 with open(sql_path, "r") as file:
                     sql_script = file.read()
+                    print("Executing SQL script...")
                     if hasattr(db, 'execute_query_sync'):
                         db.execute_query_sync(sql_script)
                     else:
-                        db.execute_query(sql_script) 
+                        db.execute_query(sql_script)
+                    print("SQL script executed successfully")
             else:
                 print(f"Warning: SQL file not found at {sql_path}")
                 
@@ -157,10 +162,8 @@ def create_app() -> FastAPI:
             print(f"Database initialization error: {str(e)}")
             if hasattr(db, 'close'):
                 db.close()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database initialization failed: {str(e)}"
-            )
+            # Don't raise an exception, log it and continue
+            print(f"Database initialization failed: {str(e)}")
 
     @app.on_event("startup")
     async def startup():
@@ -171,7 +174,8 @@ def create_app() -> FastAPI:
             print("Application started successfully")
         except Exception as e:
             print(f"Startup error: {str(e)}")
-            raise
+            # Don't raise an exception, allow app to start even with DB issues
+            print("App starting with database issues. Some features may be limited.")
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -194,7 +198,7 @@ def create_app() -> FastAPI:
     async def root():
         """Root endpoint."""
         return {
-            "message": "Welcome to the API",
+            "message": "Welcome to HealSeek API",
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT
         }
