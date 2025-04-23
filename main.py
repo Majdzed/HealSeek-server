@@ -3,10 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic_settings import BaseSettings
 from typing import List
 import os
+import sys
+import traceback
 from pathlib import Path
 from dotenv import load_dotenv
 from app.database.database import db
 from app.routes.main_route import router
+
+# Set up more verbose error handling for Heroku
+def log_error(message):
+    print(f"ERROR: {message}", file=sys.stderr)
 
 # Check for .env file and load it if exists
 env_path = Path(__file__).parent / '.env'
@@ -54,6 +60,27 @@ if database_url and database_url.startswith('postgres://'):
     # Heroku uses postgres:// but psycopg2 expects postgresql://
     os.environ['DATABASE_URL'] = database_url.replace('postgres://', 'postgresql://')
     print("Converted DATABASE_URL from postgres:// to postgresql://")
+
+# Print environment for debugging (sanitizing sensitive values)
+def print_env_debug():
+    """Print sanitized environment variables to help with debugging"""
+    print("==== Environment Variables (sanitized) ====")
+    env_vars = {
+        "DATABASE_HOST": os.getenv("DATABASE_HOST", ""),
+        "DATABASE_PORT": os.getenv("DATABASE_PORT", ""),
+        "DATABASE_NAME": os.getenv("DATABASE_NAME", ""),
+        "DATABASE_USER": "***" if os.getenv("DATABASE_USER") else "",
+        "DATABASE_PASSWORD": "***" if os.getenv("DATABASE_PASSWORD") else "",
+        "DATABASE_SSLMODE": os.getenv("DATABASE_SSLMODE", ""),
+        "DATABASE_URL_EXISTS": "Yes" if os.getenv("DATABASE_URL") else "No",
+        "PORT": os.getenv("PORT", ""),
+        "ENVIRONMENT": os.getenv("ENVIRONMENT", "")
+    }
+    for k, v in env_vars.items():
+        print(f"{k}: {v}")
+    print("=========================================")
+
+print_env_debug()
 
 class Settings(BaseSettings):
     # Basic Settings
@@ -141,29 +168,35 @@ def create_app() -> FastAPI:
     async def init_db():
         """Initialize database connection and execute setup scripts."""
         try:
-            print("Connecting to database...")
-            db.connect()
-            print("Database connected successfully")
-            
-            sql_path = Path(__file__).parent / "text.sql"
-            if sql_path.exists():
-                with open(sql_path, "r") as file:
-                    sql_script = file.read()
-                    print("Executing SQL script...")
-                    if hasattr(db, 'execute_query_sync'):
-                        db.execute_query_sync(sql_script)
-                    else:
-                        db.execute_query(sql_script)
-                    print("SQL script executed successfully")
+            print("Attempting to connect to database...")
+            connection_success = db.connect()
+            if connection_success:
+                print("Database connected successfully")
+                
+                # Only run SQL script if connection was successful
+                sql_path = Path(__file__).parent / "text.sql"
+                if sql_path.exists():
+                    try:
+                        with open(sql_path, "r") as file:
+                            sql_script = file.read()
+                            print("Executing SQL script...")
+                            if hasattr(db, 'execute_query_sync'):
+                                db.execute_query_sync(sql_script)
+                            else:
+                                db.execute_query(sql_script)
+                            print("SQL script executed successfully")
+                    except Exception as sql_error:
+                        print(f"Error executing SQL script: {str(sql_error)}")
+                        # Continue even if SQL fails
+                else:
+                    print(f"SQL file not found at {sql_path} - skipping initial schema setup")
             else:
-                print(f"Warning: SQL file not found at {sql_path}")
+                print("Database connection failed but continuing startup")
                 
         except Exception as e:
             print(f"Database initialization error: {str(e)}")
-            if hasattr(db, 'close'):
-                db.close()
-            # Don't raise an exception, log it and continue
-            print(f"Database initialization failed: {str(e)}")
+            traceback.print_exc()
+            # Always continue, even with DB issues
 
     @app.on_event("startup")
     async def startup():
@@ -171,11 +204,12 @@ def create_app() -> FastAPI:
         print("Starting application...")
         try:
             await init_db()
-            print("Application started successfully")
+            print("Application startup completed")
         except Exception as e:
             print(f"Startup error: {str(e)}")
-            # Don't raise an exception, allow app to start even with DB issues
-            print("App starting with database issues. Some features may be limited.")
+            traceback.print_exc()
+            # Always continue, even with errors
+            print("Application continuing despite startup errors")
 
     @app.on_event("shutdown")
     async def shutdown():
@@ -218,6 +252,21 @@ def create_app() -> FastAPI:
                 "database": "error",
                 "error": str(e)
             }
+
+    # Simple debug endpoint to see environment (sanitized)
+    @app.get("/debug", tags=["debug"])
+    async def debug_info():
+        """Debug information endpoint."""
+        return {
+            "database_host": settings.database_host,
+            "database_port": settings.database_port,
+            "database_name": settings.database_name,
+            "database_user": "***" if settings.database_user else "not set",
+            "database_connection": "available" if hasattr(db, 'conn') and db.conn else "not available",
+            "environment": settings.ENVIRONMENT,
+            "version": settings.VERSION
+        }
+        
     app.include_router(api_router)
     app.include_router(router)
     return app
