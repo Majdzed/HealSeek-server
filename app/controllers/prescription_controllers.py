@@ -7,17 +7,23 @@ from datetime import datetime
 def create_prescription(prescription_data: dict):
     try:
         # Create prescription
+        print(prescription_data)
+        created_at = datetime.now()
+        updated_at = datetime.now()
         prescription_query = Prescription.create(
             appointment_id=prescription_data.appointment_id,
             doctor_id=prescription_data.doctor_id,
             patient_id=prescription_data.patient_id,
             diagnosis=prescription_data.diagnosis,
             notes=prescription_data.notes,
-            created_at=datetime.now(),
-            updated_at=datetime.now()
+            created_at=created_at,
+            updated_at=updated_at
         )
         db.execute_query(prescription_query)
-        prescription_id = db.get_last_insert_id()
+        prescription_query = Prescription.find(appointment_id=prescription_data.appointment_id , created_at=created_at , updated_at=updated_at)
+        db.execute_query(prescription_query , params=(prescription_data.appointment_id, created_at, updated_at,))
+        prescription_id = db.fetch_one()[0]
+        print("hhhhhh")
 
         # Create prescription medications
         for medication in prescription_data.medications:
@@ -30,6 +36,7 @@ def create_prescription(prescription_data: dict):
                 instructions=medication.instructions
             )
             db.execute_query(medication_query)
+            print("hhhhhh")
 
         return JSONResponse(
             content={"message": "Prescription created successfully", "prescription_id": prescription_id},
@@ -249,3 +256,4 @@ def delete_prescription(prescription_id: int, doctor_id: int):
             status_code=500,
             detail=f"Error deleting prescription: {str(e)}"
         )
+    

@@ -16,6 +16,7 @@ from app.utils.twoFA import generate_2fa_code, verify_2fa_code
 from app.database.database import User as us, db, Doctor, Patient, Admin
 from app.enums.roles import Roles
 from app.models.user import Registration_input, Login_input
+from passlib.hash import bcrypt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 ph = PasswordHasher()

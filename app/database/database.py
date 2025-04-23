@@ -50,18 +50,24 @@ class Database:
         
         self.conn = None
         self.cursor = None
+        
+        # Get SSL mode from environment or use 'require' as default for Neon
+        self.sslmode = os.getenv('DATABASE_SSLMODE', 'require')
+        logger.info(f"Using SSL mode: {self.sslmode}")
+        
         self._connection_params = {
             'host': self.host,
             'port': self.port,
             'dbname': self.dbname,
             'user': self.user,
-            'password': self.password
+            'password': self.password,
+            'sslmode': self.sslmode
         }
 
     def connect(self) -> None:
         """Establish database connection with error handling"""
         try:
-            logger.info(f"Connecting to database at {self.host}:{self.port}/{self.dbname}")
+            logger.info(f"Connecting to database at {self.host}:{self.port}/{self.dbname} with sslmode={self.sslmode}")
             self.conn = psycopg2.connect(**self._connection_params)
             self.cursor = self.conn.cursor()
             self.cursor.execute("SELECT version()")
@@ -74,6 +80,8 @@ class Database:
                 logger.error("Database server connection failed. Check network and credentials.")
             elif "database" in str(e) and "does not exist" in str(e):
                 logger.error("Database does not exist. It may need to be created.")
+            elif "connection is insecure" in str(e):
+                logger.error("Connection requires SSL. Set DATABASE_SSLMODE=require")
             return False
     
     def is_connected(self) -> bool:

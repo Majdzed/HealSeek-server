@@ -6,8 +6,10 @@ from app.config import settings
 from datetime import datetime
 import cloudinary
 from cloudinary.uploader import upload
-import bcrypt
 from typing import Optional
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+from app.controllers.auth_conrtollers import hash_password , verify_password
 
 cloudinary.config(
     cloud_name = settings.CLOUD_NAME,
@@ -119,10 +121,7 @@ def update_user(user_id: int, user_data: dict):
                 raise HTTPException(status_code=400, detail=f"{field.replace('_', ' ').title()} already exists")
 
     if user_data.get("password"):
-        user_data["password"] = bcrypt.hashpw(
-            user_data["password"].encode('utf-8'), 
-            bcrypt.gensalt(10)
-        ).decode('utf-8')
+        user_data["password"] = hash_password(user_data["password"])
 
     if user_data.get('date_of_birth'):
         user_data['date_of_birth'] = user_data['date_of_birth'].isoformat()

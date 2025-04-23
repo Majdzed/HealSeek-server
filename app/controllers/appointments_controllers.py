@@ -90,7 +90,12 @@ def add_appointment(appointment : Appointment):
         raise HTTPException(status_code=500, detail="Error while checking doctor or patient ID : " + str(e))
     try:
         print(appointment.appointment_time)
-        appointment_time = datetime.fromisoformat(appointment.appointment_time)
+        appointment_time = datetime.strptime(
+            appointment.appointment_time, 
+            "%Y-%m-%dT%H:%M:%S.%fZ"
+        )
+        # Since strptime with the above format creates a naive datetime, 
+        # the tzinfo check and replace may no longer be necessary, but kept for safety
         if appointment_time.tzinfo is not None:
             appointment_time = appointment_time.replace(tzinfo=None)
         current_time = datetime.now()
@@ -112,7 +117,7 @@ def add_appointment(appointment : Appointment):
         #
         return JSONResponse(content=appointment.dict(), status_code=200)
     except Exception as e: 
-        raise HTTPException(status_code=500 , detail="error : "+str(e))
+        raise HTTPException(status_code=500 , detail="error : "+str(e) + appointment.appointment_time)
 
 def update_appointment(request:Request,appointment_id: int, appointment_data: dict):
     try:
