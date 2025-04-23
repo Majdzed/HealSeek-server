@@ -5,7 +5,6 @@ from typing import Annotated
 from uuid import uuid4
 import json
 import jwt
-import bcrypt
 import asyncio
 from fastapi import HTTPException, Request, Response, Form, Cookie
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -17,6 +16,10 @@ from app.utils.twoFA import generate_2fa_code, verify_2fa_code
 from app.database.database import User as us, db, Doctor, Patient, Admin
 from app.enums.roles import Roles
 from app.models.user import Registration_input, Login_input
+from passlib.hash import bcrypt
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+ph = PasswordHasher()
 
 
 class UserRole(str, Enum):
@@ -34,6 +37,48 @@ async def check_phone_number(user, db):
     user_query_phone_number = us.find(phone_number=user["phone_number"])
     db.execute_query(user_query_phone_number, params=(user["phone_number"],))
     return db.fetch_one()
+
+
+def hash_password(password: str) -> str:
+    """
+    Hash a password using Argon2.
+
+    Args:
+        password (str): The plaintext password to hash.
+
+    Returns:
+        str: The hashed password.
+    """
+    try:
+        # Hash the password
+        hashed_password = ph.hash(password)
+        return hashed_password
+    except Exception as e:
+        # Log the error and raise an exception
+        logger.error(f"Password hashing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing password")
+
+def verify_password(password: str, hashed_password: str) -> bool:
+    """
+    Verify a password against its hashed version.
+
+    Args:
+        password (str): The plaintext password to verify.
+        hashed_password (str): The hashed password to compare against.
+
+    Returns:
+        bool: True if the password matches, False otherwise.
+    """
+    try:
+        # Verify the password
+        return ph.verify(hashed_password, password)
+    except VerifyMismatchError:
+        # Password does not match
+        return False
+    except Exception as e:
+        # Log the error and raise an exception
+        logger.error(f"Password verification failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error verifying password")
 
 async def registeration(User: Registration_input) -> Response:
     """
@@ -108,13 +153,16 @@ async def registeration(User: Registration_input) -> Response:
             detail="Error validating user information"
         )
 
-    # # Hash password
-    # try:
-    #     salt = bcrypt.gensalt(10)
-    #     user["password"] = bcrypt.hashpw(user['password'].encode('utf-8'), salt).decode('utf-8')
-    # except Exception as e:
-    #     logger.error(f"Password hashing failed: {str(e)}")
-    #     raise HTTPException(status_code=500, detail="Error processing password")
+    # Hash password
+
+
+    try:
+        # Hash the password
+        user["password"] = hash_password(user["password"])
+    except Exception as e:
+        # Log the error and raise an exception
+        logger.error(f"Password hashing failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error processing password")
 
     # Generate user ID
     userId = int(''.join(filter(str.isdigit, str(uuid4())))[:6])
@@ -125,7 +173,7 @@ async def registeration(User: Registration_input) -> Response:
             db.execute_query(us.create(
                 user_id=userId,
                 Name=user['name'],
-                Email=user["email"],
+                Email=user["email"].lower(),
                 PhoneNumber=user.get("phone_number"),
                 DateOfBirth=user.get("date_of_birth"),
                 Password=user["password"],
@@ -196,7 +244,7 @@ def login(userCredentials: Login_input, response: Response) -> JSONResponse:
         HTTPException: 400 if credentials are invalid
     """
     userCredentials = dict(userCredentials)
-    email = userCredentials["email"]
+    email = userCredentials["email"].lower()
     password = userCredentials["password"]
 
     # Find user
@@ -214,12 +262,10 @@ def login(userCredentials: Login_input, response: Response) -> JSONResponse:
         "user_id": user_found[0]
     }
 
-    # Verify password
-    # try:
-    #     if not bcrypt.checkpw(password.encode('utf-8'), user_found["password"].encode('utf-8')):
-    #         raise HTTPException(status_code=400, detail="Invalid credentials")
-    # except Exception:
-    #     raise HTTPException(status_code=400, detail="Invalid credentials")
+    #Verify password
+
+    if not verify_password(password,user_found["password"]):
+        raise HTTPException(status_code=400, detail="Wrong password")
 
     # Generate tokens
     access_token = sign_access_token({"email": user_found["email"], "role": user_found["role"]}, 'access')
@@ -256,18 +302,19 @@ def login(userCredentials: Login_input, response: Response) -> JSONResponse:
         status_code=200,
     )
 
+    secure_flag = True
+    
     response.set_cookie(
         key="jwt",
         value=refresh_token,
         max_age=7 * 24 * 60 * 60,
         expires=(datetime.utcnow() + timedelta(days=7)).replace(tzinfo=timezone.utc),
-        domain="127.0.0.1",  # Match frontend domain
         path="/",
-        secure=False,
+        secure=True,  # Required for cross-site cookies
         httponly=True,
-        samesite="Lax"
-)
-    
+        samesite="None"  # Must be "None" for cross-site cookies
+    )
+
     return response
 
 def logout(response: Response, request: Request) -> dict:
@@ -290,13 +337,13 @@ def logout(response: Response, request: Request) -> dict:
     user_data = db.fetch_one()
     
     if not user_data:
-        response.delete_cookie('jwt')
+        response.delete_cookie('jwt' , path='/')
         return {"message": "No active session found"}
     
     # Clear refresh token
     logged_user_query = us.update(refresh_token="", user_id=user_data[0])
     db.execute_query(logged_user_query, params=("", user_data[0]))
-    response.delete_cookie('jwt')
+    response.delete_cookie('jwt', path="/")
     return {"message": "User has been logged out"}
 
 def handle_refresh_token(response: Response, request: Request) -> dict:
