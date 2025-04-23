@@ -1,0 +1,51 @@
+User = (UserId , Name , Email , PhoneNumber , DateOfBirth , Password , Gender , ProfilePictureUrl , Role );
+Doctor = (#UserId, Speciality , Experience  , MaxAppomentInDay , TeleconsultationAvailable , OfficeLocation , OfficeLocarionUrl  );
+Notfication = (NotficationId , Content , IsRead LOGICAL, CreatedAt , #UserId);
+Patient = (#UserId);
+Admin = (#UserId, TwoFactorAuthEnabled , LastLogin );
+Appointment = (AppointmentId , AppointmentTime , Status , #DoctorId, #PatientId);
+Rating = (RatingId , RatingScore , ReviewText , #DoctorId, #PatientId);
+InsuranceType = (InsuranceTypeId, TypeName);
+DoctorInsurance = (#DoctorId, #InsuranceTypeId);
+DoctorLanguages = (#DoctorId, #LanguageId);
+Language = (LanguageId, LanguageName);
+
+
+
+UserId → Name, Email, PhoneNumber, DateOfBirth, Password, Gender, ProfilePictureUrl, Role
+UserId → Speciality, Experience, MaxAppointmentInDay, TeleconsultationAvailable, OfficeLocation, OfficeLocationUrl
+UserId → TwoFactorAuthEnabled, LastLogin
+Email → UserId
+PhoneNumber → UserId
+NotificationId → Content, IsRead, CreatedAt, UserId
+AppointmentId → AppointmentTime, Status, DoctorId, PatientId
+RatingId → RatingScore, ReviewText, DoctorId, PatientId
+InsuranceTypeId → TypeName
+DoctorId, InsuranceTypeId → (DoctorInsurance)
+DoctorId, LanguageId → (DoctorLanguages)
+LanguageId → LanguageName
+
+
+before 1fn :
+User = (UserId , Name , Email , PhoneNumber , DateOfBirth , Password , Gender , ProfilePictureUrl , Role );
+Doctor = (#UserId, Speciality , Experience  , MaxAppomentInDay , TeleconsultationAvailable , OfficeLocation , OfficeLocarionUrl , Language , InsuranceType   );
+Notfication = (NotficationId , Content , IsRead LOGICAL, CreatedAt , #UserId);
+Patient = (#UserId);
+Admin = (#UserId, TwoFactorAuthEnabled , LastLogin );
+Appointment = (AppointmentId , AppointmentTime , Status , #DoctorId, #PatientId);
+Rating = (RatingId , RatingScore , ReviewText , #DoctorId, #PatientId);
+
+- each table cell should contain only a single value XXX
+colums of  InsuranceType and Language
+
+User = (UserId , Name , Email , PhoneNumber , DateOfBirth , Password , Gender , ProfilePictureUrl , Role );
+Doctor = (#UserId, Speciality , Experience  , MaxAppomentInDay , TeleconsultationAvailable , OfficeLocation , OfficeLocarionUrl  );
+Notfication = (NotficationId , Content , IsRead LOGICAL, CreatedAt , #UserId);
+Patient = (#UserId);
+Admin = (#UserId, TwoFactorAuthEnabled , LastLogin );
+Appointment = (AppointmentId , AppointmentTime , Status , #DoctorId, #PatientId);
+Rating = (RatingId , RatingScore , ReviewText , #DoctorId, #PatientId);
+InsuranceType = (InsuranceTypeId, TypeName);
+DoctorInsurance = (#DoctorId, #InsuranceTypeId);
+DoctorLanguages = (#DoctorId, #LanguageId);
+Language = (LanguageId, LanguageName);

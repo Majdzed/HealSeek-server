@@ -1,0 +1,28 @@
+node_modules
+# Keep environment variables out of version control
+.env
+.venv
+venv
+# IDE files
+.idea
+.vscode
+# Compiled files
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.log
+# Python cache files
+**/__pycache__/
+Server/app/controllers/__pycache__/
+Server/app/middlewares/__pycache__/
+*.pyc
+__pycache__/
+*/__pycache__/
+*/*/__pycache__/
+*/*/*/__pycache__/
+*/*/*/*/__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
