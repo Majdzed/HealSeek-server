@@ -57,11 +57,11 @@ if missing_or_empty_vars:
 class Settings(BaseSettings):
     # Basic Settings
     VERSION: str = "1.0.0"
-    ENVIRONMENT: str = "development"
-    DEBUG: bool = True
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "True") == "True"
     HOST: str = "0.0.0.0"
-    PORT: int = 8000
-    WORKERS: int = 1
+    PORT: int = int(os.getenv("PORT", 8000))
+    WORKERS: int = int(os.getenv("WEB_CONCURRENCY", 1))
 
     # JWT Settings
     jwt_public_key: str
@@ -113,6 +113,7 @@ def create_app() -> FastAPI:
     # Configure CORS
     origins: List[str] = [
         "http://localhost.tiangolo.com",
+        "https://healseek-0b244fb67ca5.herokuapp.com/"
         "https://localhost.tiangolo.com",
         "http://localhost",
         "http://localhost:8080",
