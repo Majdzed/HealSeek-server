@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import logging
 import os
 import urllib.parse
+import time
 from app.config import settings
 
 # Set up logging
@@ -50,6 +51,9 @@ class Database:
         
         self.conn = None
         self.cursor = None
+        self.last_connection_attempt = 0
+        self.reconnect_delay = 5  # seconds between reconnection attempts
+        self.max_retries = 3  # maximum number of connection retry attempts
         
         # Get SSL mode from environment or use 'require' as default for Neon
         self.sslmode = os.getenv('DATABASE_SSLMODE', 'require')
@@ -64,9 +68,10 @@ class Database:
             'sslmode': self.sslmode
         }
 
-    def connect(self) -> None:
+    def connect(self) -> bool:
         """Establish database connection with error handling"""
         try:
+            self.last_connection_attempt = time.time()
             logger.info(f"Connecting to database at {self.host}:{self.port}/{self.dbname} with sslmode={self.sslmode}")
             self.conn = psycopg2.connect(**self._connection_params)
             self.cursor = self.conn.cursor()
@@ -82,7 +87,32 @@ class Database:
                 logger.error("Database does not exist. It may need to be created.")
             elif "connection is insecure" in str(e):
                 logger.error("Connection requires SSL. Set DATABASE_SSLMODE=require")
+            self.conn = None
+            self.cursor = None
             return False
+    
+    def ensure_connection(self) -> bool:
+        """Ensure database connection is active, reconnect if needed"""
+        # If enough time has passed since last connection attempt, try to reconnect
+        now = time.time()
+        if not self.is_connected() and (now - self.last_connection_attempt) > self.reconnect_delay:
+            logger.info("Connection lost or not established. Attempting to reconnect...")
+            return self.connect()
+        return self.is_connected()
+    
+    def reconnect_if_needed(self, max_retries=3) -> bool:
+        """Try to reconnect to the database with multiple attempts if needed"""
+        if self.is_connected():
+            return True
+            
+        for attempt in range(max_retries):
+            logger.info(f"Reconnection attempt {attempt + 1}/{max_retries}")
+            if self.connect():
+                return True
+            time.sleep(self.reconnect_delay)
+        
+        logger.error(f"Failed to reconnect after {max_retries} attempts")
+        return False
     
     def is_connected(self) -> bool:
         """Check if database connection is active"""
@@ -93,6 +123,8 @@ class Database:
             self.cursor.execute("SELECT 1")
             return True
         except (psycopg2.Error, AttributeError):
+            self.conn = None
+            self.cursor = None
             return False
 
     def close(self) -> None:
@@ -119,15 +151,33 @@ class Database:
             raise
 
     def execute_query(self, query: Union[str, sql.Composed], params: Optional[tuple] = None) -> None:
-        """Execute a query with optional parameters and error handling"""
-        if not self.cursor:
-            raise DatabaseError("Database connection not established")
+        """Execute a query with optional parameters, error handling, and automatic reconnection"""
+        # Try to ensure we have a connection
+        if not self.ensure_connection():
+            # If we're still not connected after trying, reconnect with retries
+            if not self.reconnect_if_needed(self.max_retries):
+                raise DatabaseError("Database connection could not be established")
         
         try:
             self.cursor.execute(query, params)
             self.conn.commit()
+        except psycopg2.OperationalError as e:
+            # Connection might have been lost
+            logger.warning(f"Operational error during query: {str(e)}. Attempting to reconnect...")
+            if self.reconnect_if_needed():
+                # Retry the query once reconnected
+                try:
+                    self.cursor.execute(query, params)
+                    self.conn.commit()
+                except psycopg2.Error as retry_e:
+                    self.conn.rollback()
+                    logger.error(f"Query failed after reconnection: {str(retry_e)}")
+                    raise DatabaseError(f"Query execution failed after reconnection: {str(retry_e)}")
+            else:
+                raise DatabaseError("Could not reconnect to database")
         except psycopg2.Error as e:
-            self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
             logger.error(f"Query execution failed: {str(e)}\nQuery: {query}")
             raise DatabaseError(f"Query execution failed: {str(e)}")
 
