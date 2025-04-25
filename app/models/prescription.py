@@ -15,6 +15,7 @@ class PrescriptionCreate(BaseModel):
     diagnosis: str
     notes: str
     medications: List[MedicationCreate]
+    doctor_id: Optional[int] = None
 
 class PrescriptionUpdate(BaseModel):
     diagnosis: Optional[str] = None
